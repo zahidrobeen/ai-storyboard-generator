@@ -1,0 +1,5 @@
+{
+  "name": "Copy of AI Storyboard Generator - Deploy",
+  "description": "Upload a script to automatically generate a visual storyboard using AI. The app also includes a chatbot to answer your creative questions.",
+  "requestFramePermissions": []
+}

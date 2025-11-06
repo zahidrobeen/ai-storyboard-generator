@@ -1,15 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { StoryboardPanel } from './components/StoryboardPanel';
-import { generateImage } from './services/geminiService';
+import { generateImage, editImage } from './services/geminiService';
 import { Scene, StoryboardImage } from './types';
 import { ControlsPanel } from './components/ControlsPanel';
-import { ApiKeySelector } from './components/ApiKeySelector';
-import { Loader } from './components/Loader';
-
-// FIX: The global declaration for window.aistudio was moved to types.ts
-// to resolve conflicting declaration errors.
 
 const App: React.FC = () => {
   const [scenes, setScenes] = useState<Scene[]>([]);
@@ -17,31 +11,10 @@ const App: React.FC = () => {
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-
-
-  useEffect(() => {
-    const checkApiKey = async () => {
-      if (window.aistudio) {
-        const keyStatus = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(keyStatus);
-      } else {
-        // Fallback for environments where aistudio is not available
-        console.warn('aistudio context not found.');
-        setHasApiKey(false);
-      }
-    };
-    checkApiKey();
-  }, []);
 
   const handleApiError = (e: any) => {
     const errorMessage = e.message || 'An unknown error occurred';
-    if (errorMessage.includes("Requested entity was not found")) {
-      setError("Your API key is invalid or has been revoked. Please select a new one.");
-      setHasApiKey(false);
-    } else {
-       setError(errorMessage);
-    }
+    setError(errorMessage);
     console.error("API Error:", e);
   };
 
@@ -53,28 +26,23 @@ const App: React.FC = () => {
     setScenes([]);
     setStoryboardImages({});
     try {
-      const sentences = scriptText.match(/[^.!?]+[.!?]+/g) || [];
-      
-      const newScenes: Scene[] = [];
-      for (let i = 0; i < sentences.length; i += 2) {
-        const snippet = sentences.slice(i, i + 2).join(' ').trim();
-        if (snippet) {
-          const scene: Scene = {
-            scene_number: `Shot ${Math.floor(i / 2) + 1}`,
-            original_script_snippet: snippet,
-            visual_description: snippet,
-          };
-          newScenes.push(scene);
-        }
-      }
+      // Split script by paragraphs (one or more empty lines between text blocks)
+      const paragraphs = scriptText.split(/\n\s*\n/).filter(p => p.trim() !== '');
 
-      if (newScenes.length === 0 && scriptText.trim().length > 0) {
-        const scene: Scene = {
-            scene_number: `Shot 1`,
-            original_script_snippet: scriptText.trim(),
-            visual_description: scriptText.trim(),
-          };
-        newScenes.push(scene);
+      const newScenes: Scene[] = [];
+      const paragraphsPerScene = 2; // Group 2 paragraphs into one shot
+
+      for (let i = 0; i < paragraphs.length; i += paragraphsPerScene) {
+        const chunk = paragraphs.slice(i, i + paragraphsPerScene);
+        const combinedSnippet = chunk.map(p => p.trim()).join('\n\n');
+        
+        if (combinedSnippet) {
+          newScenes.push({
+            scene_number: `Shot ${newScenes.length + 1}`,
+            original_script_snippet: combinedSnippet,
+            visual_description: combinedSnippet,
+          });
+        }
       }
 
       setScenes(newScenes);
@@ -89,28 +57,72 @@ const App: React.FC = () => {
   
   const handleRegenerateImage = async (sceneToRegenerate: Scene) => {
     setError(null);
+    const sceneNumber = sceneToRegenerate.scene_number;
+    const existingImage = storyboardImages[sceneNumber];
+
     setStoryboardImages(prev => ({
       ...prev,
-      [sceneToRegenerate.scene_number]: { status: 'loading' },
+      [sceneNumber]: { status: 'loading' },
     }));
 
     try {
-      const imageUrl = await generateImage(sceneToRegenerate.visual_description);
+      let imageUrl: string;
+      if (existingImage?.status === 'done' && existingImage.url) {
+        imageUrl = await editImage(existingImage.url, sceneToRegenerate.visual_description);
+      } else {
+        imageUrl = await generateImage(sceneToRegenerate.visual_description);
+      }
+
       setStoryboardImages(prev => ({
         ...prev,
-        [sceneToRegenerate.scene_number]: { status: 'done', url: imageUrl },
+        [sceneNumber]: { status: 'done', url: imageUrl },
       }));
     } catch (e: any) {
       handleApiError(e);
       setStoryboardImages(prev => ({
         ...prev,
-        [sceneToRegenerate.scene_number]: { status: 'error', error: e.message || 'Generation failed' },
+        [sceneNumber]: { status: 'error', error: e.message || 'Generation failed' },
       }));
     }
   };
 
+  const handleFullRegenerateImage = async (sceneToRegenerate: Scene) => {
+    setError(null);
+    const sceneNumber = sceneToRegenerate.scene_number;
+
+    setStoryboardImages(prev => ({
+      ...prev,
+      [sceneNumber]: { status: 'loading' },
+    }));
+
+    try {
+      const imageUrl = await generateImage(sceneToRegenerate.visual_description);
+
+      setStoryboardImages(prev => ({
+        ...prev,
+        [sceneNumber]: { status: 'done', url: imageUrl },
+      }));
+    } catch (e: any) {
+      handleApiError(e);
+      setStoryboardImages(prev => ({
+        ...prev,
+        [sceneNumber]: { status: 'error', error: e.message || 'Generation failed' },
+      }));
+    }
+  };
+
+  const handlePromptChange = (sceneNumber: string, newPrompt: string) => {
+    setScenes(prevScenes =>
+      prevScenes.map(scene =>
+        scene.scene_number === sceneNumber
+          ? { ...scene, visual_description: newPrompt }
+          : scene
+      )
+    );
+  };
+
   useEffect(() => {
-    if (scenes.length > 0 && hasApiKey) {
+    if (scenes.length > 0 && !isGenerating) {
       const generateAllImages = async () => {
         setIsGenerating(true);
         setError(null);
@@ -136,33 +148,23 @@ const App: React.FC = () => {
               ...prev,
               [scene.scene_number]: { status: 'error', error: e.message || 'Generation failed' },
             }));
-            // Stop generation if API key fails
-            if (e.message?.includes("Requested entity was not found")) {
-              break;
-            }
+            // Stop generating if a critical API error occurs
+            break; 
           }
           
           if (index < scenes.length - 1) {
-            await sleep(15000); 
+            await sleep(1000); 
           }
         }
         setIsGenerating(false);
       };
-      generateAllImages();
+
+      const hasInitialImages = Object.keys(storyboardImages).length > 0;
+        if (!hasInitialImages) {
+            generateAllImages();
+        }
     }
-  }, [scenes, hasApiKey]);
-
-  if (hasApiKey === null) {
-    return (
-        <div className="flex items-center justify-center min-h-screen bg-black">
-            <Loader size="lg" text="Initializing..."/>
-        </div>
-    )
-  }
-
-  if (!hasApiKey) {
-    return <ApiKeySelector onKeySelected={() => { setHasApiKey(true); setError(null); }} />;
-  }
+  }, [scenes]);
 
   return (
     <div className="min-h-screen flex flex-col bg-black text-zinc-200">
@@ -173,7 +175,12 @@ const App: React.FC = () => {
                 onScriptSubmit={handleScriptSubmit} 
                 disabled={isParsing || isGenerating} 
             />
-            {error && <p className="text-red-400 mt-4 text-sm font-semibold">{error}</p>}
+            {error && (
+              <div className="bg-red-900/30 border border-red-500/50 text-red-300 mt-4 p-3 rounded-lg">
+                <p className="text-sm font-bold">An error occurred</p>
+                <p className="text-xs mt-1">{error}</p>
+              </div>
+            )}
         </aside>
         <div className="lg:col-span-9 xl:col-span-9 bg-black p-4 sm:p-6 overflow-y-auto h-[calc(100vh-65px)]">
             <StoryboardPanel 
@@ -181,6 +188,8 @@ const App: React.FC = () => {
               images={storyboardImages} 
               isParsing={isParsing}
               onRegenerate={handleRegenerateImage}
+              onFullRegenerate={handleFullRegenerateImage}
+              onPromptChange={handlePromptChange}
             />
         </div>
       </main>

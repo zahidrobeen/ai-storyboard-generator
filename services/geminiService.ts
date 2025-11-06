@@ -1,39 +1,145 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
-export const generateImage = async (prompt: string): Promise<string> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API key is not configured. Please select an API key.");
+// Module-level state to track which key to use. Starts with 'free'.
+let currentKeyType: 'free' | 'paid' = 'free';
+
+const getApiClient = () => {
+  const freeKey = process.env.API_KEY;
+  const paidKey = process.env.API_KEY_PAID;
+
+  let apiKeyToUse: string | undefined;
+
+  if (currentKeyType === 'paid' && paidKey) {
+    apiKeyToUse = paidKey;
+  } else {
+    apiKeyToUse = freeKey;
   }
-  // Create a new GoogleGenAI instance for each call to ensure the latest API key is used.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const enhancedPrompt = `${prompt}, cinematic film still`;
-  try {
-    const response = await ai.models.generateImages({
-      model: 'imagen-4.0-generate-001',
-      prompt: enhancedPrompt,
-      config: {
-        numberOfImages: 1,
-        aspectRatio: '16:9',
-        outputMimeType: 'image/png',
-      },
-    });
 
-    if (response.generatedImages && response.generatedImages.length > 0 && response.generatedImages[0].image) {
-      const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
+  if (!apiKeyToUse) {
+    if (paidKey) {
+        console.warn("API_KEY (free tier) is not set. Defaulting to API_KEY_PAID.");
+        currentKeyType = 'paid';
+        apiKeyToUse = paidKey;
+    } else {
+       throw new Error("API key environment variable not set. Please set API_KEY for the application to work.");
+    }
+  }
+  
+  return new GoogleGenAI({ apiKey: apiKeyToUse });
+};
+
+const handleApiError = (error: any, context: string): never => {
+    console.error(`Error ${context}:`, error);
+    if (error.message?.includes('quota')) {
+        const paidKeyAvailable = !!process.env.API_KEY_PAID;
+        // This message is shown if the paid key also hits a quota, or if no paid key was ever available.
+        if (currentKeyType === 'paid' || !paidKeyAvailable) {
+             throw new Error("The service is currently at maximum capacity. Please try again in a few moments.");
+        }
+        // This should not be hit if the retry logic is correct, but is a safe fallback.
+        throw new Error("The service is currently busy due to high demand. Please try again in a few moments.");
+    }
+    if (error.message?.includes('API key not valid') || error.message?.includes('API key is invalid') || error.message?.includes('not found')) {
+        throw new Error("An API key is invalid. Please check the application configuration.");
+    }
+    throw new Error(`Failed to ${context.toLowerCase()} due to an API error.`);
+};
+
+async function withKeyFallback<T>(apiCall: () => Promise<T>, context: string): Promise<T> {
+  try {
+    return await apiCall();
+  } catch (error: any) {
+    const paidKeyAvailable = !!process.env.API_KEY_PAID;
+    if (error.message?.includes('quota') && currentKeyType === 'free' && paidKeyAvailable) {
+      console.warn("Free tier quota exceeded. Switching to paid tier API key for this and all subsequent requests.");
+      currentKeyType = 'paid';
+      
+      try {
+        // Retry the call. The getApiClient inside will now use the paid key.
+        return await apiCall();
+      } catch (retryError: any) {
+        return handleApiError(retryError, `${context} (on paid tier fallback)`);
+      }
+    }
+    // For any other error, or if no paid key is available, handle it normally.
+    return handleApiError(error, context);
+  }
+}
+
+// --- Internal API logic functions ---
+
+const generateImageInternal = async (prompt: string): Promise<string> => {
+  const ai = getApiClient();
+  const enhancedPrompt = `${prompt}, photorealistic, cinematic film still, professional photography, landscape 16:9`;
+  
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        {
+          text: enhancedPrompt,
+        },
+      ],
+    },
+    config: {
+      responseModalities: [Modality.IMAGE],
+    },
+  });
+
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) {
+      const base64ImageBytes: string = part.inlineData.data;
       return `data:image/png;base64,${base64ImageBytes}`;
     }
-
-    throw new Error("No image was generated.");
-  } catch (error: any) {
-    console.error("Error generating image:", error);
-    // Propagate a user-friendly error message
-    if (error.message?.includes('API key not valid')) {
-        throw new Error("The selected API key is not valid. Please select a different key.");
-    }
-    if (error.message?.includes('Requested entity was not found')) {
-        throw new Error(error.message); // This will be caught in App.tsx to reset key state
-    }
-    throw new Error("Failed to generate image due to an API error.");
   }
+  
+  throw new Error("No image was generated by the model.");
+};
+
+const getBase64FromDataUrl = (dataUrl: string): string => {
+    return dataUrl.split(',')[1];
+}
+
+const editImageInternal = async (base64ImageDataUrl: string, prompt: string): Promise<string> => {
+  const ai = getApiClient();
+  const base64Data = getBase64FromDataUrl(base64ImageDataUrl);
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            data: base64Data,
+            mimeType: 'image/png',
+          },
+        },
+        {
+          text: prompt,
+        },
+      ],
+    },
+    config: {
+      responseModalities: [Modality.IMAGE],
+    },
+  });
+
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) {
+      const base64ImageBytes: string = part.inlineData.data;
+      return `data:image/png;base64,${base64ImageBytes}`;
+    }
+  }
+  
+  throw new Error("No edited image was generated.");
+};
+
+// --- Exported functions that use the key fallback wrapper ---
+
+export const generateImage = async (prompt: string): Promise<string> => {
+  return withKeyFallback(() => generateImageInternal(prompt), 'generate image');
+};
+
+export const editImage = async (base64ImageDataUrl: string, prompt: string): Promise<string> => {
+  return withKeyFallback(() => editImageInternal(base64ImageDataUrl, prompt), 'edit image');
 };

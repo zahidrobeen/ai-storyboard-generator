@@ -9,9 +9,11 @@ interface StoryboardPanelProps {
   images: Record<string, StoryboardImage>;
   isParsing: boolean;
   onRegenerate: (scene: Scene) => void;
+  onFullRegenerate: (scene: Scene) => void;
+  onPromptChange: (sceneNumber: string, newPrompt: string) => void;
 }
 
-export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images, isParsing, onRegenerate }) => {
+export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images, isParsing, onRegenerate, onFullRegenerate, onPromptChange }) => {
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
 
   const toggleExpand = (sceneNumber: string) => {
@@ -63,11 +65,11 @@ export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images
         <div className="relative group w-full h-full">
             <img src={image.url} alt={scene.visual_description} className="w-full h-full object-cover" />
             <div className="absolute top-2 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                <button onClick={() => handleDownload(image.url!, scene.scene_number)} className="p-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-sm transition-colors">
-                    <DownloadIcon className="w-5 h-5 text-white" />
-                </button>
-                 <button onClick={() => onRegenerate(scene)} className="p-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-sm transition-colors">
+                <button onClick={() => onFullRegenerate(scene)} className="p-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-sm transition-colors" title="Regenerate from scratch">
                     <ArrowPathIcon className="w-5 h-5 text-white" />
+                </button>
+                <button onClick={() => handleDownload(image.url!, scene.scene_number)} className="p-2 rounded-full bg-black/50 hover:bg-black/80 backdrop-blur-sm transition-colors" title="Download image">
+                    <DownloadIcon className="w-5 h-5 text-white" />
                 </button>
             </div>
         </div>
@@ -84,12 +86,6 @@ export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images
             <p className="text-2xl">⚠️</p>
             <p className="text-sm font-semibold mt-1">Image Failed</p>
             <p className="text-xs text-zinc-400 mt-1 max-w-full truncate">{image.error}</p>
-            <button
-            onClick={() => onRegenerate(scene)}
-            className="mt-3 px-3 py-1 bg-zinc-200 text-black text-xs font-semibold rounded hover:bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-white"
-            >
-            Retry
-            </button>
         </div>
       );
     }
@@ -104,25 +100,48 @@ export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images
         {scenes.map((scene) => {
           const isExpanded = expandedScenes.has(scene.scene_number);
           const needsTruncation = scene.original_script_snippet.length > 80;
+          const image = images[scene.scene_number];
+          const isLoading = image?.status === 'loading';
 
           return (
             <div key={scene.scene_number} className="bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 flex flex-col">
               <div className="aspect-video bg-black flex items-center justify-center flex-shrink-0">
                 {renderMedia(scene)}
               </div>
-              <div className="p-3 flex-grow flex flex-col">
-                <h3 className="font-semibold text-sm text-zinc-300">{scene.scene_number}</h3>
-                <p className={`text-zinc-400 text-xs mt-1 flex-grow ${!isExpanded && needsTruncation ? 'line-clamp-2' : ''}`}>
-                  {scene.original_script_snippet}
-                </p>
-                {needsTruncation && (
-                  <button 
-                    onClick={() => toggleExpand(scene.scene_number)} 
-                    className="text-zinc-400 text-xs mt-2 hover:text-white focus:outline-none self-start"
-                  >
-                    {isExpanded ? 'See less' : 'See more'}
-                  </button>
-                )}
+              <div className="p-3 flex-grow flex flex-col gap-3">
+                <div>
+                    <h3 className="font-semibold text-sm text-zinc-300">{scene.scene_number}</h3>
+                    <p className={`text-zinc-400 text-xs mt-1 ${!isExpanded && needsTruncation ? 'line-clamp-2' : ''}`}>
+                    {scene.original_script_snippet}
+                    </p>
+                    {needsTruncation && (
+                    <button 
+                        onClick={() => toggleExpand(scene.scene_number)} 
+                        className="text-zinc-400 text-xs mt-2 hover:text-white focus:outline-none self-start"
+                    >
+                        {isExpanded ? 'See less' : 'See more'}
+                    </button>
+                    )}
+                </div>
+                <div className="mt-auto flex flex-col gap-2">
+                    <label htmlFor={`prompt-${scene.scene_number}`} className="text-xs font-semibold text-zinc-400">Edit Instruction</label>
+                    <textarea
+                        id={`prompt-${scene.scene_number}`}
+                        value={scene.visual_description}
+                        onChange={(e) => onPromptChange(scene.scene_number, e.target.value)}
+                        rows={3}
+                        disabled={isLoading}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-[#D4FE72] transition-colors disabled:bg-zinc-800/50 disabled:cursor-not-allowed"
+                    />
+                    <button
+                        onClick={() => onRegenerate(scene)}
+                        disabled={isLoading}
+                        className="w-full flex items-center justify-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-bold py-2 px-3 rounded-md transition-colors disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed"
+                    >
+                        <ArrowPathIcon className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                        {image?.status === 'error' ? 'Retry' : 'Regenerate'}
+                    </button>
+                </div>
               </div>
             </div>
           );

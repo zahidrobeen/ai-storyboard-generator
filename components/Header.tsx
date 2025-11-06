@@ -1,5 +1,4 @@
 import React from 'react';
-import { KeyIcon } from './icons/KeyIcon';
 
 const Logo: React.FC = () => (
     <svg width="32" height="32" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -18,16 +17,7 @@ const Logo: React.FC = () => (
     </svg>
 );
 
-
 export const Header: React.FC = () => {
-    const handleChangeKey = async () => {
-        if (window.aistudio) {
-            await window.aistudio.openSelectKey();
-        } else {
-            alert("API Key selection is not available in this environment.");
-        }
-    };
-
   return (
     <header className="bg-black/80 backdrop-blur-sm border-b border-zinc-800 p-4 sticky top-0 z-20">
       <div className="flex items-center justify-between">
@@ -36,15 +26,6 @@ export const Header: React.FC = () => {
                 <Logo />
                 <h1 className="text-xl font-bold text-white tracking-tighter">Caparison AI</h1>
             </div>
-        </div>
-        <div className="flex items-center gap-2">
-             <button 
-                onClick={handleChangeKey}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 rounded-lg border border-zinc-700 transition-colors"
-             >
-                <KeyIcon className="w-4 h-4" />
-                Change API Key
-            </button>
         </div>
       </div>
     </header>

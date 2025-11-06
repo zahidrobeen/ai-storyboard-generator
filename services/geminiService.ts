@@ -95,36 +95,34 @@ export const generateImage = async (prompt: string): Promise<string> => {
     console.log("Attempt 1: Gemini Flash model (free tier)");
     return await generateWithGeminiFlash(prompt, 'free');
   } catch (geminiFreeError: any) {
-    // If primary fails for a non-quota reason, stop and report the error.
-    if (!geminiFreeError.message?.includes('quota')) {
-        return handleApiError(geminiFreeError, 'generate image (on primary model)');
-    }
-    
-    console.warn("Gemini Flash free quota exceeded. Falling back to Imagen model.");
+    console.warn("Primary model (Gemini Flash, free) failed. Reason:", geminiFreeError.message);
+    // Proceed to fallback regardless of the error type.
+  }
 
-    // 2. Try Imagen on Free Tier (Fallback)
+  // 2. Try Imagen on Free Tier (Fallback)
+  try {
+    console.log("Attempt 2: Imagen model (free tier)");
+    return await generateWithImagen(prompt);
+  } catch (imagenError: any) {
+    console.warn("Fallback model (Imagen, free) failed. Reason:", imagenError.message);
+    // Proceed to paid tier regardless of the error type.
+  }
+      
+  // 3. Try Gemini Flash on Paid Tier
+  if (process.env.API_KEY_PAID) {
     try {
-      console.log("Attempt 2: Imagen model (free tier)");
-      return await generateWithImagen(prompt);
-    } catch (imagenError: any) {
-      console.warn("Imagen model (free fallback) failed. Reason:", imagenError.message);
-      
-      // ANY failure on the Imagen fallback (quota, regional error, etc.) triggers a move to the paid tier.
-      if (!process.env.API_KEY_PAID) {
-        console.error("Paid fallback failed: API_KEY_PAID is not configured.");
-        return handleApiError(imagenError, 'generate image (all free tiers failed, paid fallback unavailable)');
-      }
-      
-      // 3. Try Gemini Flash on Paid Tier
-      try {
-        console.log("Attempt 3: Gemini Flash model (paid tier)");
-        setTier('paid'); // Notify UI of tier change
-        return await generateWithGeminiFlash(prompt, 'paid');
-      } catch (geminiPaidError: any) {
-        return handleApiError(geminiPaidError, 'generate image (on paid tier)');
-      }
+      console.log("Attempt 3: Gemini Flash model (paid tier)");
+      setTier('paid'); // Notify UI of tier change
+      return await generateWithGeminiFlash(prompt, 'paid');
+    } catch (geminiPaidError: any) {
+      // If even the paid tier fails, throw a final error.
+      return handleApiError(geminiPaidError, 'generate image (on paid tier)');
     }
   }
+
+  // If we reach here, it means all free tiers failed and there was no paid key.
+  const lastError = new Error("All free tiers failed and no paid API key is available.");
+  return handleApiError(lastError, 'generate image');
 };
 
 const getBase64FromDataUrl = (dataUrl: string): string => dataUrl.split(',')[1];
@@ -154,25 +152,27 @@ const editImageInternal = async (base64ImageDataUrl: string, prompt: string, key
 };
 
 export const editImage = async (base64ImageDataUrl: string, prompt: string): Promise<string> => {
+    // 1. Try on Free Tier
     try {
+        console.log("Attempt 1: Edit image (free tier)");
         return await editImageInternal(base64ImageDataUrl, prompt, 'free');
     } catch(freeError: any) {
-        if (freeError.message?.includes('quota')) {
-            console.warn("Edit image free quota exceeded. Falling back to paid tier.");
+        console.warn("Edit on free tier failed. Reason:", freeError.message);
+        // Proceed to paid tier.
+    }
 
-            if (!process.env.API_KEY_PAID) {
-                console.error("Paid fallback for edit failed: API_KEY_PAID is not configured.");
-                return handleApiError(freeError, 'edit image (paid fallback unavailable)');
-            }
-
-            try {
-                setTier('paid'); // Notify UI of tier change
-                return await editImageInternal(base64ImageDataUrl, prompt, 'paid');
-            } catch (paidError: any) {
-                return handleApiError(paidError, 'edit image (on paid tier)');
-            }
-        } else {
-            return handleApiError(freeError, 'edit image (on free tier)');
+    // 2. Try on Paid Tier
+    if (process.env.API_KEY_PAID) {
+        try {
+            console.log("Attempt 2: Edit image (paid tier)");
+            setTier('paid'); // Notify UI of tier change
+            return await editImageInternal(base64ImageDataUrl, prompt, 'paid');
+        } catch (paidError: any) {
+            return handleApiError(paidError, 'edit image (on paid tier)');
         }
     }
+
+    // If we reach here, free tier failed and no paid key exists.
+    const lastError = new Error("Editing on free tier failed and no paid API key is available.");
+    return handleApiError(lastError, 'edit image');
 };

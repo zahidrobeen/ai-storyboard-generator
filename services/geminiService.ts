@@ -90,41 +90,39 @@ const generateWithGeminiFlash = async (prompt: string, keyType: 'free' | 'paid')
 // --- Exported Orchestration Functions ---
 
 export const generateImage = async (prompt: string): Promise<string> => {
-  // 1. Try Imagen on Free Tier
+  // 1. Try Gemini Flash on Free Tier (Primary)
   try {
-    console.log("Attempt 1: Imagen model (free tier)");
-    return await generateWithImagen(prompt);
-  } catch (imagenError: any) {
-    if (imagenError.message?.includes('quota')) {
-      console.warn("Imagen free quota exceeded. Falling back to Gemini Flash.");
+    console.log("Attempt 1: Gemini Flash model (free tier)");
+    return await generateWithGeminiFlash(prompt, 'free');
+  } catch (geminiFreeError: any) {
+    // If primary fails for a non-quota reason, stop and report the error.
+    if (!geminiFreeError.message?.includes('quota')) {
+        return handleApiError(geminiFreeError, 'generate image (on primary model)');
+    }
+    
+    console.warn("Gemini Flash free quota exceeded. Falling back to Imagen model.");
 
-      // 2. Try Gemini Flash on Free Tier
-      try {
-        console.log("Attempt 2: Gemini Flash model (free tier)");
-        return await generateWithGeminiFlash(prompt, 'free');
-      } catch (geminiFreeError: any) {
-        if (geminiFreeError.message?.includes('quota')) {
-          console.warn("Gemini Flash free quota exceeded. Falling back to paid tier.");
-          
-          if (!process.env.API_KEY_PAID) {
-            console.error("Paid fallback failed: API_KEY_PAID is not configured.");
-            return handleApiError(geminiFreeError, 'generate image (paid fallback unavailable)');
-          }
-          
-          // 3. Try Gemini Flash on Paid Tier
-          try {
-            console.log("Attempt 3: Gemini Flash model (paid tier)");
-            setTier('paid'); // Notify UI of tier change
-            return await generateWithGeminiFlash(prompt, 'paid');
-          } catch (geminiPaidError: any) {
-            return handleApiError(geminiPaidError, 'generate image (on paid tier)');
-          }
-        } else {
-          return handleApiError(geminiFreeError, 'generate image (on free tier fallback)');
-        }
+    // 2. Try Imagen on Free Tier (Fallback)
+    try {
+      console.log("Attempt 2: Imagen model (free tier)");
+      return await generateWithImagen(prompt);
+    } catch (imagenError: any) {
+      console.warn("Imagen model (free fallback) failed. Reason:", imagenError.message);
+      
+      // ANY failure on the Imagen fallback (quota, regional error, etc.) triggers a move to the paid tier.
+      if (!process.env.API_KEY_PAID) {
+        console.error("Paid fallback failed: API_KEY_PAID is not configured.");
+        return handleApiError(imagenError, 'generate image (all free tiers failed, paid fallback unavailable)');
       }
-    } else {
-      return handleApiError(imagenError, 'generate image (on primary model)');
+      
+      // 3. Try Gemini Flash on Paid Tier
+      try {
+        console.log("Attempt 3: Gemini Flash model (paid tier)");
+        setTier('paid'); // Notify UI of tier change
+        return await generateWithGeminiFlash(prompt, 'paid');
+      } catch (geminiPaidError: any) {
+        return handleApiError(geminiPaidError, 'generate image (on paid tier)');
+      }
     }
   }
 };

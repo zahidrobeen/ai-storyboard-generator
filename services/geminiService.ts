@@ -1,12 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
-
-export const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateImage = async (prompt: string): Promise<string> => {
+  if (!process.env.API_KEY) {
+    throw new Error("API key is not configured. Please select an API key.");
+  }
+  // Create a new GoogleGenAI instance for each call to ensure the latest API key is used.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   const enhancedPrompt = `${prompt}, cinematic film still`;
   try {
     const response = await ai.models.generateImages({
@@ -25,8 +25,15 @@ export const generateImage = async (prompt: string): Promise<string> => {
     }
 
     throw new Error("No image was generated.");
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating image:", error);
-    throw new Error("Failed to generate image.");
+    // Propagate a user-friendly error message
+    if (error.message?.includes('API key not valid')) {
+        throw new Error("The selected API key is not valid. Please select a different key.");
+    }
+    if (error.message?.includes('Requested entity was not found')) {
+        throw new Error(error.message); // This will be caught in App.tsx to reset key state
+    }
+    throw new Error("Failed to generate image due to an API error.");
   }
 };

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { StoryboardPanel } from './components/StoryboardPanel';
-import { generateImage, editImage } from './services/geminiService';
+import { generateImage, editImage, getCurrentTier, tierChangeNotifier } from './services/geminiService';
 import { Scene, StoryboardImage } from './types';
 import { ControlsPanel } from './components/ControlsPanel';
 
@@ -11,6 +11,17 @@ const App: React.FC = () => {
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [apiTier, setApiTier] = useState<'free' | 'paid'>(getCurrentTier());
+
+  useEffect(() => {
+    const handleTierChange = () => {
+        setApiTier(getCurrentTier());
+    };
+    tierChangeNotifier.addEventListener('tierChange', handleTierChange);
+    return () => {
+        tierChangeNotifier.removeEventListener('tierChange', handleTierChange);
+    };
+  }, []);
 
   const handleApiError = (e: any) => {
     const errorMessage = e.message || 'An unknown error occurred';
@@ -26,11 +37,10 @@ const App: React.FC = () => {
     setScenes([]);
     setStoryboardImages({});
     try {
-      // Split script by paragraphs (one or more empty lines between text blocks)
       const paragraphs = scriptText.split(/\n\s*\n/).filter(p => p.trim() !== '');
 
       const newScenes: Scene[] = [];
-      const paragraphsPerScene = 2; // Group 2 paragraphs into one shot
+      const paragraphsPerScene = apiTier === 'free' ? 1 : 2;
 
       for (let i = 0; i < paragraphs.length; i += paragraphsPerScene) {
         const chunk = paragraphs.slice(i, i + paragraphsPerScene);
@@ -41,6 +51,7 @@ const App: React.FC = () => {
             scene_number: `Shot ${newScenes.length + 1}`,
             original_script_snippet: combinedSnippet,
             visual_description: combinedSnippet,
+            edit_instruction: '',
           });
         }
       }
@@ -67,8 +78,8 @@ const App: React.FC = () => {
 
     try {
       let imageUrl: string;
-      if (existingImage?.status === 'done' && existingImage.url) {
-        imageUrl = await editImage(existingImage.url, sceneToRegenerate.visual_description);
+      if (existingImage?.status === 'done' && existingImage.url && sceneToRegenerate.edit_instruction.trim()) {
+        imageUrl = await editImage(existingImage.url, sceneToRegenerate.edit_instruction);
       } else {
         imageUrl = await generateImage(sceneToRegenerate.visual_description);
       }
@@ -115,7 +126,7 @@ const App: React.FC = () => {
     setScenes(prevScenes =>
       prevScenes.map(scene =>
         scene.scene_number === sceneNumber
-          ? { ...scene, visual_description: newPrompt }
+          ? { ...scene, edit_instruction: newPrompt }
           : scene
       )
     );
@@ -148,7 +159,6 @@ const App: React.FC = () => {
               ...prev,
               [scene.scene_number]: { status: 'error', error: e.message || 'Generation failed' },
             }));
-            // Stop generating if a critical API error occurs
             break; 
           }
           
@@ -174,6 +184,7 @@ const App: React.FC = () => {
             <ControlsPanel 
                 onScriptSubmit={handleScriptSubmit} 
                 disabled={isParsing || isGenerating} 
+                apiTier={apiTier}
             />
             {error && (
               <div className="bg-red-900/30 border border-red-500/50 text-red-300 mt-4 p-3 rounded-lg">

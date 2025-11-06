@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 
 interface ControlsPanelProps {
   onScriptSubmit: (content: string) => void;
   disabled: boolean;
+  apiTier: 'free' | 'paid';
 }
 
 const ChevronDown: React.FC<{className?: string}> = ({className}) => (
@@ -11,8 +12,20 @@ const ChevronDown: React.FC<{className?: string}> = ({className}) => (
     </svg>
 )
 
-export const ControlsPanel: React.FC<ControlsPanelProps> = ({ onScriptSubmit, disabled }) => {
+export const ControlsPanel: React.FC<ControlsPanelProps> = ({ onScriptSubmit, disabled, apiTier }) => {
   const [scriptText, setScriptText] = useState<string>('');
+
+  const { estimatedCost, sceneCount } = useMemo(() => {
+    if (!scriptText.trim()) {
+      return { estimatedCost: 0, sceneCount: 0 };
+    }
+    const paragraphs = scriptText.split(/\n\s*\n/).filter(p => p.trim() !== '');
+    const paragraphsPerScene = apiTier === 'free' ? 1 : 2;
+    const count = Math.ceil(paragraphs.length / paragraphsPerScene);
+    const cost = count * 0.039;
+    return { estimatedCost: cost, sceneCount: count };
+  }, [scriptText, apiTier]);
+
 
   const handleSubmit = () => {
     if (scriptText.trim()) {
@@ -50,6 +63,14 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({ onScriptSubmit, di
              <OptionCard label="Aspect Ratio" value="16:9"/>
         </div>
 
+        {estimatedCost > 0 && (
+            <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-center my-2">
+                <p className="text-xs text-zinc-400 uppercase tracking-wider">Estimated Cost</p>
+                <p className="text-2xl font-bold text-[#D4FE72] mt-1">${estimatedCost.toFixed(2)}</p>
+                <p className="text-xs text-zinc-500 mt-1">{sceneCount} {sceneCount === 1 ? 'shot' : 'shots'} @ $0.039/image</p>
+            </div>
+        )}
+
 
       <div className="mt-auto">
         <button
@@ -58,7 +79,6 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({ onScriptSubmit, di
             className="w-full bg-[#D4FE72] text-black font-bold py-3 px-4 rounded-lg hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#1C1C1E] focus:ring-[#D4FE72] transition-all duration-200 disabled:bg-zinc-600 disabled:text-zinc-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
             {disabled ? 'Generating...' : 'Generate'}
-            {!disabled && <span className="text-xs font-bold bg-black/10 px-2 py-1 rounded-md">✨ 50</span>}
         </button>
       </div>
     </div>

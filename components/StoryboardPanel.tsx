@@ -127,8 +127,9 @@ export const StoryboardPanel: React.FC<StoryboardPanelProps> = ({ scenes, images
                     <label htmlFor={`prompt-${scene.scene_number}`} className="text-xs font-semibold text-zinc-400">Edit Instruction</label>
                     <textarea
                         id={`prompt-${scene.scene_number}`}
-                        value={scene.visual_description}
+                        value={scene.edit_instruction}
                         onChange={(e) => onPromptChange(scene.scene_number, e.target.value)}
+                        placeholder="Write your prompt to make any changes!"
                         rows={3}
                         disabled={isLoading}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-[#D4FE72] transition-colors disabled:bg-zinc-800/50 disabled:cursor-not-allowed"

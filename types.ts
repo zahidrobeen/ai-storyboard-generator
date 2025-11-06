@@ -2,6 +2,7 @@ export interface Scene {
   scene_number: string;
   visual_description: string;
   original_script_snippet: string;
+  edit_instruction: string;
 }
 
 export interface StoryboardImage {
